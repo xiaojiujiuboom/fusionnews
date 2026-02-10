@@ -8,8 +8,8 @@ from bs4 import BeautifulSoup
 # --- 配置部分 ---
 SERVERCHAN_SENDKEY = os.environ.get("SERVERCHAN_SENDKEY")
 GEMINI_API_KEY = os.environ.get("GOOGLE_API_KEY") 
-SEARCH_API_KEY = os.environ.get("GOOGLE_SEARCH_API_KEY") 
-SEARCH_CX = os.environ.get("GOOGLE_SEARCH_CX")
+SEARCH_API_KEY = os.environ.get("GOOGLESEARCH_API_KEY") 
+SEARCH_CX = os.environ.get("GOOGLESEARCH_CX")
 
 # 初始化 Gemini
 genai.configure(api_key=GEMINI_API_KEY)
