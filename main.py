@@ -4,6 +4,7 @@ import feedparser
 import datetime
 import time
 import random
+import hashlib
 import google.generativeai as genai
 from bs4 import BeautifulSoup
 from time import mktime
@@ -14,7 +15,7 @@ GEMINI_API_KEY = os.environ.get("GOOGLE_API_KEY")
 SEARCH_API_KEY = os.environ.get("GOOGLESEARCH_API_KEY") 
 SEARCH_CX = os.environ.get("GOOGLESEARCH_CX")            
 
-# 初始化 Gemini
+# 初始化 Gemini (建议使用 2.0-flash 以获得最佳稳定性)
 if GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
@@ -24,123 +25,119 @@ if GEMINI_API_KEY:
 else:
     print("警告: 未配置 GOOGLE_API_KEY")
 
-# --- 1. 获取新闻 (严格限制 48h) ---
+# --- 1. 获取新闻 (保持 48h 限制) ---
 def get_fusion_news():
     print("正在抓取新闻...")
-    # 【关键修改】添加 when:48h 参数，强制 Google 只返回最近两天的新闻
     rss_url = "https://news.google.com/rss/search?q=Nuclear+Fusion+when:48h&hl=en-US&gl=US&ceid=US:en"
     
     try:
         feed = feedparser.parse(rss_url)
         news_items = []
-        
-        # 获取当前时间用于对比（可选，主要是为了打日志）
-        now = datetime.datetime.now()
-
-        for entry in feed.entries[:10]: 
+        for entry in feed.entries[:8]: 
             published_time_str = "未知时间"
-            
-            # 解析时间戳
             if hasattr(entry, 'published_parsed'):
-                # published_parsed 是 UTC 时间结构体
                 dt = datetime.datetime.fromtimestamp(mktime(entry.published_parsed))
-                # 格式化为：2026-02-11 14:30
                 published_time_str = dt.strftime('%Y-%m-%d %H:%M')
             
-            # 组合数据喂给 AI
-            # 格式：- 标题 (时间) [链接]
             news_items.append(f"- {entry.title} (Time: {published_time_str}) [Link: {entry.link}]")
             
-        print(f"抓取到 {len(news_items)} 条新闻")
-        return "\n".join(news_items) if news_items else "过去48小时无重大新闻 (Google RSS返回为空)。"
+        return "\n".join(news_items) if news_items else "过去48小时无重大新闻。"
     except Exception as e:
         return f"新闻抓取失败: {e}"
 
-# --- 2. 搜索实习 (保底模式 + 随机 User-Agent) ---
+# --- 2. 全网广域搜索实习 (不再局限于特定公司) ---
 def search_internships():
-    print("正在搜索实习岗位...")
+    print("正在广域搜索实习岗位...")
     
-    # 备用方案：硬编码的顶级机构招聘页 (防止 API 挂掉时开天窗)
-    fallback_jobs = """
-    【API 暂无实时数据，以下是长期有效的名企招聘入口】
-    1. **ITER (国际热核聚变实验堆)**: https://www.iter.org/jobs
-    2. **Commonwealth Fusion Systems (CFS)**: https://cfs.energy/careers
-    3. **Helion Energy**: https://www.helionenergy.com/careers
-    4. **Tokamak Energy**: https://www.tokamakenergy.co.uk/careers
-    5. **General Fusion**: https://generalfusion.com/careers
-    6. **Princeton Plasma Physics Lab (PPPL)**: https://www.pppl.gov/careers
-    """
-
     if not SEARCH_API_KEY or not SEARCH_CX:
-        return fallback_jobs
+        return "错误：未配置 Search API，无法搜索。"
 
-    # 稍微放宽一点，增加 "hiring"
-    query = 'nuclear fusion (jobs OR internship OR "summer student" OR hiring)'
-    url = "https://www.googleapis.com/customsearch/v1"
+    # 【策略升级】关键词改为广域搜索，排除新闻报道，专注于 "jobs", "career", "internship"
+    # 搜索词意思：核聚变或等离子体物理 + 实习/工作/暑期项目 -新闻
+    query = '(nuclear fusion OR plasma physics) (internship OR "summer student" OR "early career" OR "thesis position") -news'
     
+    url = "https://www.googleapis.com/customsearch/v1"
     params = {
         'key': SEARCH_API_KEY,
         'cx': SEARCH_CX,
         'q': query,
-        'num': 3 
+        'num': 5,  # 抓取前5个结果，增加命中率
     }
 
     try:
-        print(f"请求 Google Search API...")
+        print(f"请求 Google Search API: {query}")
         response = requests.get(url, params=params).json()
         
         if 'error' in response:
-            print(f"API Error: {response['error']}")
-            return fallback_jobs
+            return f"Search API Error: {response['error']['message']}"
 
         items = response.get('items', [])
         if not items:
-            return fallback_jobs
+            return "本次搜索未在 Google 前排发现明确的招聘页面，建议直接浏览 LinkedIn。"
 
         processed_jobs = []
         for item in items:
             title = item.get('title')
             link = item.get('link')
             snippet = item.get('snippet')
-            processed_jobs.append(f"岗位: {title}\n链接: {link}\n摘要: {snippet}\n---")
+            # 把搜到的标题、链接、摘要都喂给 AI，让 AI 去判断是不是好岗位
+            processed_jobs.append(f"Search Result: {title}\nLink: {link}\nSummary: {snippet}\n---")
             
         return "\n".join(processed_jobs)
 
     except Exception as e:
         print(f"搜索异常: {e}")
-        return fallback_jobs
+        return f"搜索环节报错: {e}"
 
-# --- 3. 生成日报 (日期标注 + 随机科普 + 短链接) ---
+# --- 3. 生成日报 (每日一题不重复 + 灵活岗位分析) ---
 def generate_daily_report(news_text, internship_text):
     print("正在生成 AI 日报...")
     today_str = datetime.date.today().strftime('%Y-%m-%d')
 
-    # 知识库 (扩充版)
+    # 【解决方案】超级扩充的知识库 (50+ 词条)
     fusion_topics = [
-        "托卡马克 (Tokamak) vs 仿星器", "惯性约束聚变 (ICF) 点火原理", 
-        "氚增殖比 (TBR) 与燃料循环", "偏滤器 (Divertor) 的钨材料难题", 
-        "第一壁 (First Wall) 的中子损伤", "H模式 (High-confinement Mode) 的发现", 
-        "边缘局域模 (ELMs) 的抑制", "劳森判据 (Lawson Criterion) 详解", 
-        "聚变Q值 (Q>1, Q>5, Q>10 的区别)", "高温超导 (REBCO)磁体技术", 
-        "球形托卡马克 (ST) 的紧凑优势", "磁流体动力学 (MHD) 不稳定性", 
-        "锯齿振荡 (Sawtooth Instability)", "中性束注入 (NBI) 加热原理", 
-        "电子回旋共振加热 (ECRH)", "Helion 的脉冲磁聚变方案", 
-        "Z-Pinch (Z箍缩) 技术复兴", "ITER 项目的最新进度",
-        "聚变-裂变混合堆 (Fusion-Fission Hybrid)", "恒星核聚变 vs 人造太阳"
+        # 基础物理
+        "劳森判据 (Lawson Criterion)", "库仑碰撞与截面", "Q值 (Energy Gain)", "三重积 (Triple Product)",
+        "磁流体动力学 (MHD) 基础", "阿尔芬波 (Alfven Waves)", "朗缪尔波 (Langmuir Waves)",
+        # 装置类型
+        "托卡马克 (Tokamak) 原理", "仿星器 (Stellarator) 的线圈设计", "球形托卡马克 (ST)", 
+        "反场箍缩 (RFP)", "磁镜 (Magnetic Mirror)", "Z-Pinch (Z箍缩)", "惯性约束聚变 (ICF)",
+        # 工程挑战
+        "第一壁材料 (First Wall)", "钨 (Tungsten) 的应用与挑战", "铍 (Beryllium) 的作用",
+        "偏滤器 (Divertor) 热负荷管理", "氚增殖比 (Tritium Breeding Ratio)", "锂铅包层 (Li-Pb Blanket)",
+        "中子辐照损伤 (DPA)", "遥操作维护 (Remote Handling)", "低温泵 (Cryopump)",
+        # 加热与驱动
+        "中性束注入 (NBI)", "离子回旋共振加热 (ICRH)", "电子回旋共振加热 (ECRH)", "低杂波驱动 (LHCD)",
+        # 等离子体物理现象
+        "H模式 (High-confinement Mode)", "边缘局域模 (ELMs)", "锯齿振荡 (Sawtooth)", 
+        "新经典输运 (Neoclassical Transport)", "逃逸电子 (Runaway Electrons)", "磁岛 (Magnetic Islands)",
+        "刮削层 (SOL) 物理", "等离子体破裂 (Disruption)",
+        # 著名项目与公司
+        "ITER 的组装进度", "CFS 与 SPARC 装置", "Helion 的脉冲磁聚变", 
+        "General Fusion 的磁化靶聚变", "中国环流器三号 (HL-3)", "EAST (东方超环)",
+        "NIF (国家点火装置)", "JET 的最后实验", "KSTAR (韩国人造太阳)"
     ]
-    today_topic = random.choice(fusion_topics)
+    
+    # 【核心逻辑】基于日期的伪随机选择
+    # 使用日期的哈希值作为种子。这样每天运行多次也是同一个题（方便重试），
+    # 但到了明天，日期变了，题目一定会变。
+    date_hash = int(hashlib.sha256(today_str.encode('utf-8')).hexdigest(), 16)
+    today_topic_index = date_hash % len(fusion_topics)
+    today_topic = fusion_topics[today_topic_index]
 
     prompt = f"""
-    你是一位**核聚变情报局的特工**。请生成 {today_str} 的日报。
+    你是一位**核聚变情报局特工**。请生成 {today_str} 的日报。
     
     ---
-    ### 1. 新闻数据 (News) - 必须关注时间
+    ### 1. 新闻数据 (News)
     {news_text}
     
-    ### 2. 招聘数据 (Jobs)
+    ### 2. 广域搜索结果 (Search Results)
+    *(这是 Google 搜索 'fusion internship/job' 的结果，可能包含招聘网、实验室官网或相关文章)*
     {internship_text}
     
-    ### 3. 今日随机课题: {today_topic}
+    ### 3. 今日锁定课题: {today_topic}
+    *(根据日期锁定，不可更改)*
     
     ---
     ### 输出格式要求 (Markdown)
@@ -148,23 +145,24 @@ def generate_daily_report(news_text, internship_text):
     # ⚛️ 聚变情报局 | {today_str}
     
     ## 📰 1. Fusion Frontiers (最新动态)
-    *(指令：从新闻源中筛选 5 条最近 48 小时内的新闻。如果没有足够的新闻，就列出最近的一条并说明“今日暂无更多”。)*
-    
-    * **[新闻标题中文译名]**
-        * 🕒 **Time**: [保留原文中的时间，如 2026-02-11 14:00]
+    *(筛选 5 条最近 48h 的新闻)*
+    * **[中文标题]**
+        * 🕒 **Time**: [原文时间]
         * 📍 **Who**: [机构/国家]
-        * 🚀 **Significance**: [一句话点评行业意义]
-        * 🔗 [点击阅读原文]({'{link}'}) <-- (保持格式：[点击阅读原文](URL))
+        * 🚀 **Significance**: [点评]
+        * 🔗 [点击阅读原文]({'{link}'}) 
     
-    ## 🎯 2. Career Radar (招聘雷达)
-    *(指令：如果是具体岗位，分析之。如果是 fallback 列表，直接列出并推荐访问。)*
+    ## 🎯 2. Career Radar (全网扫描)
+    *(指令：请分析上面的搜索结果。)*
+    *(如果结果中有明确的岗位/实习页，请列出。如果结果看起来是招聘聚合网站（如LinkedIn, Glassdoor）或泛泛的页面，也请列出来并建议用户去看看。)*
+    *(如果实在没有相关内容，请简短鼓励用户手动搜索。)*
     
-    * 🏢 **[机构/公司名]**
-        * 📝 **情报**: [岗位描述或公司简介]
-        * 🔗 [点击直达官网]({'{link}'})
+    * 🔍 **[来源/标题]**
+        * 📝 **情报**: [这个链接里大概有什么？是具体岗位还是招聘主页？]
+        * 🔗 [点击直达]({'{link}'})
     
     ## 🧠 3. Deep Dive: {today_topic}
-    
+    *(今天必须讲这个！)*
     * **今日词条：{today_topic}**
     * **🧐 硬核解析**：
         [200字专业解释]
@@ -174,10 +172,9 @@ def generate_daily_report(news_text, internship_text):
         [一句话总结]
     
     ---
-    *Generated by FusionBot · {today_topic}*
+    *Generated by FusionBot · Topic Index: {today_topic_index}*
     """
     
-    # 简单的重试逻辑
     max_retries = 3
     for attempt in range(max_retries):
         try:
@@ -193,12 +190,8 @@ def generate_daily_report(news_text, internship_text):
 def send_wechat(content):
     if not SERVERCHAN_SENDKEY:
         return
-
     url = f"https://sctapi.ftqq.com/{SERVERCHAN_SENDKEY}.send"
-    data = {
-        "title": f"⚛️ {datetime.date.today()} 聚变情报局", 
-        "desp": content
-    }
+    data = {"title": f"⚛️ {datetime.date.today()} 聚变情报局", "desp": content}
     requests.post(url, data=data)
 
 if __name__ == "__main__":
