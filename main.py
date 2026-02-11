@@ -30,7 +30,7 @@ def get_fusion_news():
     try:
         feed = feedparser.parse(rss_url)
         news_items = []
-        for entry in feed.entries[:10]:
+        for entry in feed.entries[:8]:
             published_date = "未知日期"
             if hasattr(entry, 'published_parsed'):
                 dt = datetime.datetime.fromtimestamp(mktime(entry.published_parsed))
