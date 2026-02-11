@@ -2,8 +2,8 @@ name: Fusion Daily Run
 
 on:
   schedule:
-    # 北京时间每天早上 09:00 (即 UTC 时间 01:00)
-    - cron: '0 1 * * *'
+    # wien每天早上 09:00 (即 UTC 时间 08:00)
+    - cron: '0 8 * * *'
   # 👇 这一行就是“手动运行按钮”的开关，必须顶格写，不能有缩进错误
   workflow_dispatch:
 
