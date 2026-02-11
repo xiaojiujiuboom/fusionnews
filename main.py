@@ -3,6 +3,7 @@ import requests
 import feedparser
 import datetime
 import time
+import random  # 新增：用于随机抽题
 import google.generativeai as genai
 from bs4 import BeautifulSoup
 from time import mktime
@@ -17,7 +18,8 @@ SEARCH_CX = os.environ.get("GOOGLESEARCH_CX")
 if GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        # 使用 1.5-flash 以获得最佳稳定性
+        model = genai.GenerativeModel('gemini-1.5-flash')
     except Exception as e:
         print(f"Gemini 配置出错: {e}")
 else:
@@ -26,35 +28,37 @@ else:
 # --- 1. 获取新闻 ---
 def get_fusion_news():
     print("正在抓取新闻...")
-    rss_url = "https://news.google.com/rss/search?q=Nuclear+Fusion+when:48h&hl=en-US&gl=US&ceid=US:en"
+    # 稍微放宽一点搜索词，确保有内容
+    rss_url = "https://news.google.com/rss/search?q=Nuclear+Fusion+energy&hl=en-US&gl=US&ceid=US:en"
     try:
         feed = feedparser.parse(rss_url)
         news_items = []
-        for entry in feed.entries[:8]:
+        for entry in feed.entries[:8]: # 抓取前8条给AI筛选
             published_date = "未知日期"
             if hasattr(entry, 'published_parsed'):
                 dt = datetime.datetime.fromtimestamp(mktime(entry.published_parsed))
                 published_date = dt.strftime('%Y-%m-%d')
             
             news_items.append(f"- [{entry.title}]({entry.link}) (日期: {published_date})")
-        return "\n".join(news_items) if news_items else "过去48小时无重大新闻。"
+        return "\n".join(news_items) if news_items else "暂无重大新闻。"
     except Exception as e:
         return f"新闻抓取失败: {e}"
 
-# --- 2. 搜索实习 ---
+# --- 2. 搜索实习 (优化版：移除死板的时间限制) ---
 def search_internships():
     print("正在搜索实习岗位...")
     if not SEARCH_API_KEY or not SEARCH_CX:
         return "错误：代码无法读取到 Search Key。"
 
-    query = '"nuclear fusion" (internship OR thesis OR "summer student" OR "phd position") -news'
+    # 优化关键词：增加 career, job，移除 -news 以免误伤
+    query = '"nuclear fusion" (internship OR "summer student" OR "phd position" OR career)'
     url = "https://www.googleapis.com/customsearch/v1"
     
     params = {
         'key': SEARCH_API_KEY,
         'cx': SEARCH_CX,
         'q': query,
-        'dateRestrict': 'm3',
+        # 'dateRestrict': 'm3',  <-- 【关键修改】移除时间限制，让AI去判断页面里的内容是否过期
         'num': 3 
     }
 
@@ -66,7 +70,7 @@ def search_internships():
 
         items = response.get('items', [])
         if not items:
-            return "最近3个月未发现高相关度的实习信息。"
+            return "Search API 返回空结果 (未找到相关页面)。"
 
         processed_jobs = []
         for item in items:
@@ -74,92 +78,109 @@ def search_internships():
             link = item.get('link')
             snippet = item.get('snippet')
             
-            page_content = snippet
-            try:
-                headers = {'User-Agent': 'Mozilla/5.0 (compatible; FusionBot/1.0)'}
-                page_res = requests.get(link, headers=headers, timeout=5)
-                if page_res.status_code == 200:
-                    soup = BeautifulSoup(page_res.text, 'html.parser')
-                    for script in soup(["script", "style"]):
-                        script.extract()
-                    page_content = " ".join(soup.get_text().split())[:3000]
-            except:
-                pass 
-            
-            processed_jobs.append(f"岗位: {title}\n链接: {link}\n内容: {page_content}\n---")
+            # 简单清洗
+            processed_jobs.append(f"岗位标题: {title}\n链接: {link}\n摘要: {snippet}\n---")
             
         return "\n".join(processed_jobs)
     except Exception as e:
         return f"实习搜索出错: {e}"
 
-# --- 3. 生成日报 (Prompts 深度优化版) ---
+# --- 3. 生成日报 (随机题库 + 链接优化) ---
 def generate_daily_report(news_text, internship_text):
     print("正在生成 AI 日报...")
     today_str = datetime.date.today().strftime('%Y-%m-%d')
 
-    # 这是一个精心设计的系统级 Prompt
+    # 【新增】核聚变知识随机题库 (防止每天讲一样的内容)
+    fusion_topics = [
+        "托卡马克(Tokamak)与仿星器(Stellarator)的区别",
+        "氚增殖比 (Tritium Breeding Ratio, TBR)",
+        "偏滤器 (Divertor) 的热负荷挑战",
+        "第一壁材料 (First Wall Materials) 与中子辐照",
+        "磁流体动力学 (MHD) 不稳定性",
+        "锯齿振荡 (Sawtooth instability)",
+        "边缘局域模 (ELMs)",
+        "H模式 (High-confinement mode) 与 L模式",
+        "劳森判据 (Lawson Criterion)",
+        "Q值 (Q factor) 与点火条件",
+        "ITER 项目的工程挑战",
+        "惯性约束聚变 (Inertial Confinement Fusion)",
+        "瑞利-泰勒不稳定性 (Rayleigh-Taylor instability)",
+        "高温超导磁体 (HTS magnets) 在聚变中的应用",
+        "球形托卡马克 (Spherical Tokamak)",
+        "场反向配置 (Field-Reversed Configuration, FRC)",
+        "Helion Energy 的脉冲磁聚变方案",
+        "聚变反应堆的遥操作维护 (Remote Handling)",
+        "锂铅包层 (Li-Pb Blanket)",
+        "聚变能的经济性分析 (LCOE)"
+    ]
+    # 每天随机选一个
+    today_topic = random.choice(fusion_topics)
+    print(f"今日随机科普主题: {today_topic}")
+
     prompt = f"""
     你是一位**深耕核聚变领域的资深科研助理**，同时也是一位文笔幽默、逻辑严密的科技博主。
-    你的目标受众是：物理系学生、核工专业研究生以及聚变技术发烧友。
-    
     请根据以下输入数据，为我生成一份 {today_str} 的《核聚变情报局·每日简报》。
-    
+
     ---
-    
     ### 输入数据区
-    **1. 新闻源数据 (News Data):**
+    **1. 新闻源数据:**
     {news_text}
-    
-    **2. 实习岗位抓取数据 (Internship Data):**
+
+    **2. 实习岗位抓取数据:**
     {internship_text}
     
+    **3. 今日指定科普主题:** {today_topic}
+
     ---
-    
-    ### 输出要求 (请严格按照以下 Markdown 格式输出)
-    
-    # 聚变情报局 | {today_str}
+    ### 输出要求 (Markdown格式)
+
+    # ⚛️ 聚变情报局 | {today_str}
     > "在这里，我们离人造太阳更近一步。"
-    
+
     ## 📰 1. Fusion Frontiers
-    *(指令：从新闻源中筛选出真正有价值的 7-8 条新闻。剔除重复或无意义的营销文。)*
-    *(格式：每一条新闻请按以下结构撰写，务必用中文)*
-    
-    * **[新闻标题 (中文翻译)]**
-        * 📍 **Who/Where**: [机构或地点，如 ITER, CFS, 麻省理工]
-        * 💡 **Core**: [用一句话概括发生了什么核心事件]
-        * 🚀 **Significance**: [**重点！** 深度解析这条新闻意味着什么？是工程突破？理论验证？还是资金到位？请用专业的眼光点评其对行业的价值]
-        * 🔗 [原文链接]
-    
+    *(指令：筛选 5-7 条有价值的新闻。)*
+    * **[新闻标题 (中文)]**
+        * 📍 **Who**: [机构/地点]
+        * 💡 **Core**: [核心事件简述]
+        * 🚀 **Significance**: [深度点评意义]
+        * 🔗 [点击阅读原文]({'{link}'})  <-- **重要指令：不要直接显示长链接，请使用 Markdown 语法将链接隐藏在“点击阅读原文”文字中，保留原始链接地址。**
+
     ## 🎯 2. Career Radar
-    *(指令：仔细分析抓取到的岗位信息。如果没有实质性的岗位，请分析一下为什么，是没有抓取到还是没有。)*
-    *(格式：如果有岗位，请按以下结构)*
+    *(指令：根据抓取到的数据分析。由于我们取消了搜索时间限制，请你根据摘要内容判断这些岗位是否看起来像近期的。如果数据里没有明显的岗位，请幽默地写一段鼓励的话，不要报错。)*
     
-    * 🏢 **[推测出的机构名称]** —— **[岗位名称]**
-        * 📝 **任务书**: [简单概括要干什么活，比如仿真模拟、材料测试、还是洗试管？]
-        * 🎓 **通缉令**: [他们想要什么背景的人？PhD? Python高手? 还是拥有极强抗压能力？]
-        * 🔗 [申请传送门](链接)
+    * 🏢 **[机构名]** —— **[岗位名]**
+        * 📝 **任务**: [干什么]
+        * 🎓 **要求**: [要什么人]
+        * 🔗 [点击直达官网]({'{link}'}) <-- **重要：使用短链接格式**
+
+    ## 🧠 3. Deep Dive: {today_topic}
+    *(指令：今天必须讲解这个特定主题：**{today_topic}**。)*
     
-    ## 🧠 3. Deep Dive
-    *(指令：这是本文的灵魂。请利用你作为 AI 的庞大知识库，讲解一个**进阶**的核聚变知识点。)*
-    *(选题建议包括但不限于：MHD不稳定性、托卡马克偏滤器热负荷、仿星器线圈优化、球形托卡马克优势、惯性约束的点火条件、氚增殖比 TBR 等。)*
-    
-    * **今日词条：[知识点名称]**
+    * **今日词条：{today_topic}**
     * **🧐 硬核原理解析**：
-        [用专业术语准确描述其物理机制，约 200 字。展示你的专业性]
+        [专业术语描述机制，约 200 字]
     * **🍎 也就是人话版**：
-        [**重点！** 使用一个极其通俗、生活化的比喻来解释上面的概念。比如把等离子体比作果冻，把磁场比作笼子等。让大一新生也能听懂。约 150 字]
+        [**重点！** 使用极其通俗、生活化的比喻（如用水管、果冻、交通拥堵等比喻）。约 150 字]
     * **🤔 为什么它很重要？**：
-        [一句话点出它在聚变发电道路上的地位]
-    
+        [一句话点评]
+
     ---
-    *保持好奇，探索未来*
+    *由 GitHub Actions 自动生成 · 今日随机种子: {today_topic}*
     """
     
-    try:
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"AI 生成报告失败: {e}"
+    # 重试机制
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            print(f"尝试 {attempt+1} 失败: {e}")
+            if "429" in str(e):
+                time.sleep(10)
+            else:
+                time.sleep(5)
+    return "❌ 生成失败，请检查 API 配额或网络。"
 
 # --- 4. 推送 ---
 def send_wechat(content):
@@ -167,10 +188,9 @@ def send_wechat(content):
         print("未配置 Server酱 Key，跳过推送")
         return
 
-    # 标题加上 Emoji 让通知栏更好看
     url = f"https://sctapi.ftqq.com/{SERVERCHAN_SENDKEY}.send"
     data = {
-        "title": f"⚛️ {datetime.date.today()} 聚变情报局日报", 
+        "title": f"⚛️ {datetime.date.today()} 聚变情报局", 
         "desp": content
     }
     requests.post(url, data=data)
@@ -179,5 +199,5 @@ if __name__ == "__main__":
     news = get_fusion_news()
     internships = search_internships()
     report = generate_daily_report(news, internships)
-    print(report) # 在日志里打印预览
+    print(report)
     send_wechat(report)
