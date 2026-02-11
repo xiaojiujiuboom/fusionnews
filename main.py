@@ -45,7 +45,7 @@ def get_fusion_news():
 # --- 2. 广域搜索实习 ---
 def search_internships():
     print("正在搜索实习岗位...")
-    if not GOOGLESEARCHAPI_KEY or not GOOFLESEARCH_CX:
+    if not SEARCHAPI_KEY or not SEARCH_CX:
         return "错误：未配置 Google Search API Key 或 CX ID。"
 
     # 搜索关键词优化：强制包含 fusion，寻找 internship/thesis
