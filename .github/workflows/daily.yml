@@ -4,7 +4,7 @@ on:
   schedule:
     # 北京时间每天早上 09:00 (即 UTC 时间 01:00)
     - cron: '0 1 * * *'
-  # 允许你手动点击按钮测试
+  # 👇 这一行就是“手动运行按钮”的开关，必须顶格写，不能有缩进错误
   workflow_dispatch:
 
 jobs:
@@ -24,11 +24,12 @@ jobs:
         run: |
           pip install requests feedparser google-generativeai beautifulsoup4
 
-     - name: Run Script
+      - name: Run Script
         env:
+          # 左边是 Python 代码里的变量名，右边是 GitHub 后台保险箱的钥匙
           SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          # 下面这两行必须改成没有下划线的，对应你的 Secret 名字
+          # 👇 这一部分必须和你截图里的 Secret 名字完全一致 (无下划线)
           GOOGLESEARCH_API_KEY: ${{ secrets.GOOGLESEARCH_API_KEY }}
           GOOGLESEARCH_CX: ${{ secrets.GOOGLESEARCH_CX }}
         run: python main.py
