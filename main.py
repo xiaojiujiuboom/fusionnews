@@ -8,14 +8,15 @@ import hashlib
 import google.generativeai as genai
 from bs4 import BeautifulSoup
 from time import mktime
+# 【新增】引入 DuckDuckGo 搜索库
+from duckduckgo_search import DDGS
 
 # --- 配置部分 ---
 SERVERCHAN_SENDKEY = os.environ.get("SERVERCHAN_SENDKEY")
 GEMINI_API_KEY = os.environ.get("GOOGLE_API_KEY") 
-SEARCH_API_KEY = os.environ.get("GOOGLESEARCH_API_KEY") 
-SEARCH_CX = os.environ.get("GOOGLESEARCH_CX")            
+# 注意：Google Search 的 Key 和 CX 现在已经不需要了，代码里会自动忽略它们
 
-# 初始化 Gemini (建议使用 2.0-flash 以获得最佳稳定性)
+# 初始化 Gemini (建议使用 1.5-flash 以获得最佳稳定性)
 if GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
@@ -45,49 +46,38 @@ def get_fusion_news():
     except Exception as e:
         return f"新闻抓取失败: {e}"
 
-# --- 2. 全网广域搜索实习 (不再局限于特定公司) ---
+# --- 2. 全网广域搜索实习 (DuckDuckGo 版本 - 无需配置) ---
 def search_internships():
-    print("正在广域搜索实习岗位...")
+    print("正在使用 DuckDuckGo 广域搜索实习岗位...")
     
-    if not SEARCH_API_KEY or not SEARCH_CX:
-        return "错误：未配置 Search API，无法搜索。"
-
-    # 【策略升级】关键词改为广域搜索，排除新闻报道，专注于 "jobs", "career", "internship"
-    # 搜索词意思：核聚变或等离子体物理 + 实习/工作/暑期项目 -新闻
+    # 搜索词：核聚变/等离子体 + 实习/工作 -新闻
+    # 移除了 site 限制，让它真正跑全网
     query = '(nuclear fusion OR plasma physics) (internship OR "summer student" OR "early career" OR "thesis position") -news'
     
-    url = "https://www.googleapis.com/customsearch/v1"
-    params = {
-        'key': SEARCH_API_KEY,
-        'cx': SEARCH_CX,
-        'q': query,
-        'num': 5,  # 抓取前5个结果，增加命中率
-    }
-
     try:
-        print(f"请求 Google Search API: {query}")
-        response = requests.get(url, params=params).json()
+        # 使用 DuckDuckGo 搜索，获取前 5 条结果
+        # max_results 控制返回数量
+        results = DDGS().text(query, max_results=5)
         
-        if 'error' in response:
-            return f"Search API Error: {response['error']['message']}"
-
-        items = response.get('items', [])
-        if not items:
-            return "本次搜索未在 Google 前排发现明确的招聘页面，建议直接浏览 LinkedIn。"
+        if not results:
+            return "DuckDuckGo 暂未返回搜索结果，建议手动浏览 LinkedIn。"
 
         processed_jobs = []
-        for item in items:
-            title = item.get('title')
-            link = item.get('link')
-            snippet = item.get('snippet')
-            # 把搜到的标题、链接、摘要都喂给 AI，让 AI 去判断是不是好岗位
+        for item in results:
+            # DuckDuckGo 返回的字段通常是 title, href, body
+            title = item.get('title', 'No Title')
+            link = item.get('href', '#')
+            snippet = item.get('body', 'No snippet')
+            
             processed_jobs.append(f"Search Result: {title}\nLink: {link}\nSummary: {snippet}\n---")
             
+        print(f"成功抓取到 {len(processed_jobs)} 条搜索结果")
         return "\n".join(processed_jobs)
 
     except Exception as e:
-        print(f"搜索异常: {e}")
-        return f"搜索环节报错: {e}"
+        print(f"DuckDuckGo 搜索异常: {e}")
+        # 如果出错，为了防止报错，返回一个提示
+        return f"搜索环节暂时不可用: {e}"
 
 # --- 3. 生成日报 (每日一题不重复 + 灵活岗位分析) ---
 def generate_daily_report(news_text, internship_text):
@@ -119,8 +109,6 @@ def generate_daily_report(news_text, internship_text):
     ]
     
     # 【核心逻辑】基于日期的伪随机选择
-    # 使用日期的哈希值作为种子。这样每天运行多次也是同一个题（方便重试），
-    # 但到了明天，日期变了，题目一定会变。
     date_hash = int(hashlib.sha256(today_str.encode('utf-8')).hexdigest(), 16)
     today_topic_index = date_hash % len(fusion_topics)
     today_topic = fusion_topics[today_topic_index]
@@ -132,8 +120,8 @@ def generate_daily_report(news_text, internship_text):
     ### 1. 新闻数据 (News)
     {news_text}
     
-    ### 2. 广域搜索结果 (Search Results)
-    *(这是 Google 搜索 'fusion internship/job' 的结果，可能包含招聘网、实验室官网或相关文章)*
+    ### 2. 广域搜索结果 (From DuckDuckGo)
+    *(这是全网搜索 'fusion internship/job' 的结果)*
     {internship_text}
     
     ### 3. 今日锁定课题: {today_topic}
@@ -153,9 +141,8 @@ def generate_daily_report(news_text, internship_text):
         * 🔗 [点击阅读原文]({'{link}'}) 
     
     ## 🎯 2. Career Radar (全网扫描)
-    *(指令：请分析上面的搜索结果。)*
+    *(指令：请分析上面的搜索结果。总结出职位描述、岗位职责、岗位要求)*
     *(如果结果中有明确的岗位/实习页，请列出。如果结果看起来是招聘聚合网站（如LinkedIn, Glassdoor）或泛泛的页面，也请列出来并建议用户去看看。)*
-    *(如果实在没有相关内容，请简短鼓励用户手动搜索。)*
     
     * 🔍 **[来源/标题]**
         * 📝 **情报**: [这个链接里大概有什么？是具体岗位还是招聘主页？]
