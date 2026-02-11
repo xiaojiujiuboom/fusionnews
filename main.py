@@ -6,16 +6,15 @@ import time
 import random
 import hashlib
 import google.generativeai as genai
+from bs4 import BeautifulSoup
 from time import mktime
-# 【核心库】引入 DuckDuckGo，无需 API Key 即可全网搜索
 from duckduckgo_search import DDGS
 
 # --- 配置部分 ---
 SERVERCHAN_SENDKEY = os.environ.get("SERVERCHAN_SENDKEY")
 GEMINI_API_KEY = os.environ.get("GOOGLE_API_KEY") 
 
-# 初始化 Gemini
-# 使用 1.5-flash 以保证最大稳定性（2.0 预览版目前容易限流）
+# 初始化 Gemini (使用 1.5-flash)
 if GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
@@ -25,7 +24,40 @@ if GEMINI_API_KEY:
 else:
     print("警告: 未配置 GOOGLE_API_KEY")
 
-# --- 1. 获取新闻 (保持 48h 限制) ---
+# --- 辅助函数：网页内容提取器 (借鉴 WorkAggregation 思路) ---
+def fetch_webpage_content(url):
+    """
+    模拟浏览器访问 URL，提取网页正文文本
+    """
+    try:
+        # 伪装成浏览器，防止被简单的反爬虫拦截
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5'
+        }
+        # 设置 10秒 超时，防止卡死
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status() # 检查 404/500 错误
+        
+        # 使用 BeautifulSoup 解析 HTML
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # 移除 script, style 等无用标签
+        for script in soup(["script", "style", "nav", "footer", "header", "iframe"]):
+            script.extract()
+            
+        # 获取纯文本
+        text = soup.get_text(separator=' ', strip=True)
+        
+        # 截取前 2500 个字符 (防止 Token 爆炸，通常 JD 都在前面)
+        return text[:2500]
+        
+    except Exception as e:
+        print(f"  - 访问链接失败 {url}: {e}")
+        return None # 抓取失败返回空
+
+# --- 1. 获取新闻 ---
 def get_fusion_news():
     print("正在抓取新闻...")
     rss_url = "https://news.google.com/rss/search?q=Nuclear+Fusion+when:48h&hl=en-US&gl=US&ceid=US:en"
@@ -45,135 +77,122 @@ def get_fusion_news():
     except Exception as e:
         return f"新闻抓取失败: {e}"
 
-# --- 2. 智能全网职位挖掘 (融合了 Smart Search + DuckDuckGo) ---
+# --- 2. 深度职位挖掘 (Search + Visit) ---
 def search_internships():
-    print("正在智能挖掘职位信息...")
+    print("正在启动深度职位挖掘机...")
     
-    # 【策略升级】定义一组“猎头级”搜索指令
-    # 每次运行脚本时，随机从这里面选一个去搜，这样能保证每天看到的岗位来源不同
-    # 既包含通用搜索，也包含针对特定大厂或特定语气的搜索
+    # 策略组合：混合搜索，试图找到具体的招聘页面
     search_strategies = [
-        # 策略A: 寻找带有“正在招聘”字眼的页面 (最精准)
-        '(nuclear fusion OR plasma physics) "we are hiring" -news',
-        # 策略B: 寻找具体的职位空缺公告
-        '(nuclear fusion OR plasma physics) "job opening" -linkedin -indeed',
-        # 策略C: 针对实习和早期职业
-        '"fusion energy" ("internship" OR "summer student" OR "thesis") 2025 2026',
-        # 策略D: 定点爆破 ITER 和 CFS (两个最大的坑)
-        'ITER Organization "jobs" OR "vacancies"',
-        'Commonwealth Fusion Systems "careers"',
-        # 策略E: 宽泛的职位搜索
-        'nuclear fusion engineer jobs remote or onsite'
+        'site:iter.org "job" OR "internship" -filetype:pdf',
+        'site:cfs.energy "careers" OR "jobs"',
+        'site:helionenergy.com "openings"',
+        'site:pppl.gov "jobs"',
+        '"nuclear fusion" "we are hiring" -news',
+        '"plasma physics" internship 2025'
     ]
     
-    # 随机选择一个策略
     query = random.choice(search_strategies)
-    print(f"本次雷达扫描指令: {query}")
+    print(f"本次雷达锁定: {query}")
 
     try:
-        # 使用 DuckDuckGo 搜索，获取前 8 条结果 (给 AI 足够的素材)
-        results = DDGS().text(query, max_results=8)
+        # 1. 先搜链接
+        # 减少数量到 4 个，因为后面要一个个访问，太慢了会超时
+        results = DDGS().text(query, max_results=4)
         
         if not results:
-            return f"DuckDuckGo 本次扫描 ({query}) 未返回结果，建议手动访问 LinkedIn。"
+            return "DuckDuckGo 未发现雷达信号，建议手动检查。"
 
         processed_jobs = []
         for item in results:
             title = item.get('title', 'No Title')
             link = item.get('href', '#')
-            snippet = item.get('body', 'No snippet')
+            snippet = item.get('body', '')
             
-            # 简单的关键词过滤，去掉显而易见的广告
-            if "top 10" in title.lower() or "best colleges" in title.lower():
-                continue
-                
-            processed_jobs.append(f"Source: {title}\nLink: {link}\nSnippet: {snippet}\n---")
+            print(f"发现线索: {title}，正在派遣爬虫深入侦察...")
             
-        print(f"成功抓取到 {len(processed_jobs)} 条潜在岗位线索")
+            # 2. 【核心升级】点进去看！
+            # 调用上面的 fetch 函数去抓网页正文
+            full_content = fetch_webpage_content(link)
+            
+            if full_content:
+                # 如果抓到了正文，就喂给 AI 正文
+                content_to_use = f"【网页正文抓取】: {full_content}"
+            else:
+                # 如果抓取失败（比如被反爬），回退到使用摘要
+                content_to_use = f"【仅摘要】: {snippet}"
+            
+            processed_jobs.append(f"SOURCE_URL: {link}\nTITLE: {title}\nCONTENT: {content_to_use}\n---")
+            
+            # 礼貌性延时，防止请求太快被封
+            time.sleep(2)
+            
         return "\n".join(processed_jobs)
 
     except Exception as e:
-        print(f"搜索异常: {e}")
+        print(f"挖掘机故障: {e}")
         return f"职位扫描模块暂时休眠: {e}"
 
-# --- 3. 生成日报 (详细 Prompt + 每日一题) ---
+# --- 3. 生成日报 (Prompt 适配长文本) ---
 def generate_daily_report(news_text, internship_text):
     print("正在生成 AI 日报...")
     today_str = datetime.date.today().strftime('%Y-%m-%d')
 
-    # 【超级扩充知识库】确保每天不重样 (50+ 词条)
     fusion_topics = [
-        "劳森判据 (Lawson Criterion)", "库仑碰撞与截面", "Q值 (Energy Gain)", "三重积",
-        "磁流体动力学 (MHD)", "阿尔芬波", "朗缪尔波",
-        "托卡马克原理", "仿星器线圈设计", "球形托卡马克 (ST)", 
-        "反场箍缩 (RFP)", "磁镜", "Z-Pinch", "惯性约束聚变 (ICF) 点火",
-        "第一壁材料", "钨 (Tungsten) 的应用", "铍 (Beryllium)",
-        "偏滤器 (Divertor) 热负荷", "氚增殖比 (TBR)", "锂铅包层",
-        "中子辐照损伤 (DPA)", "遥操作维护 (Remote Handling)", "低温泵技术",
-        "中性束注入 (NBI)", "离子回旋共振加热 (ICRH)", "电子回旋加热 (ECRH)", "低杂波驱动",
-        "H模式 (High-confinement Mode)", "边缘局域模 (ELMs)", "锯齿振荡", 
-        "新经典输运", "逃逸电子", "磁岛效应", "等离子体破裂 (Disruption)",
-        "ITER 组装进度", "CFS SPARC", "Helion 脉冲磁聚变", 
-        "General Fusion", "中国环流器三号 (HL-3)", "EAST", "NIF 激光聚变"
+        "劳森判据", "库仑碰撞", "Q值", "三重积", "MHD不稳定性", "阿尔芬波", 
+        "托卡马克", "仿星器", "球形托卡马克", "反场箍缩", "Z-Pinch", "ICF",
+        "第一壁材料", "钨", "铍", "偏滤器", "氚增殖比", "锂铅包层", "中子辐照", 
+        "NBI加热", "ICRH", "ECRH", "H模式", "ELMs", "锯齿振荡", 
+        "ITER", "CFS SPARC", "Helion", "General Fusion", "HL-3", "NIF"
     ]
     
-    # 基于日期的哈希选择，保证全天一致，隔天变样
     date_hash = int(hashlib.sha256(today_str.encode('utf-8')).hexdigest(), 16)
-    today_topic_index = date_hash % len(fusion_topics)
-    today_topic = fusion_topics[today_topic_index]
+    today_topic = fusion_topics[date_hash % len(fusion_topics)]
 
     prompt = f"""
-    你是一位**核聚变情报局的特工**。请生成 {today_str} 的日报。
+    你是一位**核聚变情报局特工**。请生成 {today_str} 的日报。
     
     ---
-    ### 1. 新闻数据 (News)
+    ### 1. News Data
     {news_text}
     
-    ### 2. 招聘线索 (Raw Job Search Data)
-    *(这是通过全网搜索关键词抓取到的结果，包含标题和摘要)*
+    ### 2. Job Intel (深度抓取数据)
+    *(以下数据包含了爬虫直接从网页抓取的正文。请忽略网页导航栏等杂讯，重点提取职位描述、要求。)*
     {internship_text}
     
-    ### 3. 今日锁定课题: {today_topic}
-    *(根据日期锁定，不可更改)*
+    ### 3. Topic: {today_topic}
     
     ---
-    ### 输出格式要求 (Markdown)
+    ### 输出要求 (Markdown)
     
     # ⚛️ 聚变情报局 | {today_str}
     
-    ## 📰 1. Fusion Frontiers (最新动态)
-    *(筛选 5 条最近 48h 的新闻)*
+    ## 📰 1. Fusion Frontiers
+    *(筛选 4-5 条新闻)*
     * **[中文标题]**
-        * 🕒 **Time**: [原文时间]
-        * 📍 **Who**: [机构/国家]
+        * 🕒 **Time**: [时间]
         * 🚀 **Significance**: [点评]
         * 🔗 [点击阅读原文]({'{link}'}) 
     
-    ## 🎯 2. Career Radar (智能猎头分析)
-    *(指令：请扮演一位专业的猎头，仔细分析上面的“招聘线索”。)*
-    *(不要只复制粘贴！请阅读搜索结果的Snippet(摘要)，尝试推断出：这是哪个机构？他们在找什么样的人？)*
-    *(如果搜索结果显示的是“We are hiring”的公告页，请重点推荐。)*
+    ## 🎯 2. Career Radar (深度侦察)
+    *(指令：我已通过爬虫抓取了网页正文。请根据【网页正文抓取】的内容，像猎头一样详细分析。)*
+    *(如果抓取内容包含 "Apply"、"Requirements"、"Responsibilities" 等干货，请重点列出。)*
+    *(如果抓取内容看起来是很多职位的列表页，请总结“该机构正在招聘哪些方向的人才”。)*
     
-    * 🔍 **[职位名称/机构名称]**
-        * 📝 **岗位情报**: [根据摘要推断：这是全职/实习？涉及物理/工程/仿真？]
-        * 🛠️ **关键要求**: [如果摘要里提到了Python, PhD, CAD等关键词，请列出；如果没有，写“建议点击详情查看”]
-        * 🔗 [点击直达]({'{link}'})
+    * 🏢 **[机构/职位名称]**
+        * 📝 **深度情报**: [从正文中提取：具体在做什么项目？涉及什么物理/工程难题？]
+        * 🛠️ **通缉令**: [从正文中提取：硬性要求是什么？PhD？Python？C++？]
+        * 🔗 [点击直达官网]({'{link}'})
     
     ## 🧠 3. Deep Dive: {today_topic}
-    *(今天必须讲这个！)*
     * **今日词条：{today_topic}**
-    * **🧐 硬核解析**：
-        [200字专业解释，可以使用物理术语]
-    * **🍎 人话版**：
-        [**必须使用生活中的比喻** (如做饭、交通、气球等) 来解释上面的概念，让小白也能懂。150字]
-    * **🤔 为什么重要？**：
-        [一句话总结它在聚变发电中的地位]
+    * **🧐 硬核解析**：[200字]
+    * **🍎 人话版**：[生活比喻，150字]
+    * **🤔 为什么重要？**：[一句话]
     
     ---
-    *Generated by FusionBot · Topic Index: {today_topic_index}*
+    *Generated by FusionBot · Topic: {today_topic}*
     """
     
-    # 重试机制
     max_retries = 3
     for attempt in range(max_retries):
         try:
