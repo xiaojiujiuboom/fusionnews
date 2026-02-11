@@ -18,8 +18,8 @@ SEARCH_CX = os.environ.get("GOOGLESEARCH_CX")
 if GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        # 使用 1.5-flash 以获得最佳稳定性
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # 使用 2.0-flash 以获得最佳稳定性
+        model = genai.GenerativeModel('gemini-2.0-flash')
     except Exception as e:
         print(f"Gemini 配置出错: {e}")
 else:
