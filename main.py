@@ -8,11 +8,10 @@ from bs4 import BeautifulSoup
 from time import mktime
 
 # --- 配置部分 ---
-# 【关键修改】这里必须和你截图里的 Secret 名字完全一致
 SERVERCHAN_SENDKEY = os.environ.get("SERVERCHAN_SENDKEY")
 GEMINI_API_KEY = os.environ.get("GOOGLE_API_KEY") 
-SEARCH_API_KEY = os.environ.get("GOOGLESEARCH_API_KEY") # 改成无下划线
-SEARCH_CX = os.environ.get("GOOGLESEARCH_CX")           # 改成无下划线
+SEARCH_API_KEY = os.environ.get("GOOGLESEARCH_API_KEY") 
+SEARCH_CX = os.environ.get("GOOGLESEARCH_CX")            
 
 # 初始化 Gemini
 if GEMINI_API_KEY:
@@ -45,10 +44,8 @@ def get_fusion_news():
 # --- 2. 搜索实习 ---
 def search_internships():
     print("正在搜索实习岗位...")
-    
-    # 检查 Key 是否存在
     if not SEARCH_API_KEY or not SEARCH_CX:
-        return "错误：代码无法读取到 Search Key。请检查 main.py 和 yaml 文件中的变量名是否一致。"
+        return "错误：代码无法读取到 Search Key。"
 
     query = '"nuclear fusion" (internship OR thesis OR "summer student" OR "phd position") -news'
     url = "https://www.googleapis.com/customsearch/v1"
@@ -95,24 +92,67 @@ def search_internships():
     except Exception as e:
         return f"实习搜索出错: {e}"
 
-# --- 3. 生成日报 ---
+# --- 3. 生成日报 (Prompts 深度优化版) ---
 def generate_daily_report(news_text, internship_text):
     print("正在生成 AI 日报...")
     today_str = datetime.date.today().strftime('%Y-%m-%d')
 
+    # 这是一个精心设计的系统级 Prompt
     prompt = f"""
-    你是一位核聚变科研助理。请生成 {today_str} 的日报。
-
-    ### 第一部分：聚变前沿 (News)
+    你是一位**深耕核聚变领域的资深科研助理**，同时也是一位文笔幽默、逻辑严密的科技博主。
+    你的目标受众是：物理系学生、核工专业研究生以及聚变技术发烧友。
+    
+    请根据以下输入数据，为我生成一份 {today_str} 的《核聚变情报局·每日简报》。
+    
+    ---
+    
+    ### 输入数据区
+    **1. 新闻源数据 (News Data):**
     {news_text}
-    要求：挑选最有价值的新闻，按 Markdown 列表输出，包含[What, Significance]。
-
-    ### 第二部分：岗位雷达 (Jobs)
+    
+    **2. 实习岗位抓取数据 (Internship Data):**
     {internship_text}
-    要求：针对每个岗位，提取 [机构, 职责, 要求]，保留链接。如果没有合适岗位，请明确说明。
-
-    ### 第三部分：每日硬核科普 (Deep Dive)
-    要求：讲解一个进阶的核聚变物理/工程知识点（如MHD、TBR、偏滤器等），250字左右，深度适中。
+    
+    ---
+    
+    ### 输出要求 (请严格按照以下 Markdown 格式输出)
+    
+    # 聚变情报局 | {today_str}
+    > "在这里，我们离人造太阳更近一步。"
+    
+    ## 📰 1. 前沿动态 (Fusion Frontiers)
+    *(指令：从新闻源中筛选出真正有价值的 7-8 条新闻。剔除重复或无意义的营销文。)*
+    *(格式：每一条新闻请按以下结构撰写，务必用中文)*
+    
+    * **[新闻标题 (中文翻译)]**
+        * 📍 **Who/Where**: [机构或地点，如 ITER, CFS, 麻省理工]
+        * 💡 **Core**: [用一句话概括发生了什么核心事件]
+        * 🚀 **Significance**: [**重点！** 深度解析这条新闻意味着什么？是工程突破？理论验证？还是资金到位？请用专业的眼光点评其对行业的价值]
+        * 🔗 [原文链接]
+    
+    ## 🎯 2. 实习雷达 (Career Radar)
+    *(指令：仔细分析抓取到的岗位信息。如果没有实质性的岗位，请幽默地写：“今日雷达扫描无异常，建议去官网手动蹲守”。)*
+    *(格式：如果有岗位，请按以下结构)*
+    
+    * 🏢 **[推测出的机构名称]** —— **[岗位名称]**
+        * 📝 **任务书**: [简单概括要干什么活，比如仿真模拟、材料测试、还是洗试管？]
+        * 🎓 **通缉令**: [他们想要什么背景的人？PhD? Python高手? 还是拥有极强抗压能力？]
+        * 🔗 [申请传送门](链接)
+    
+    ## 🧠 3. 每日硬核科普 (Deep Dive)
+    *(指令：这是本文的灵魂。请利用你作为 AI 的庞大知识库，讲解一个**进阶**的核聚变知识点。)*
+    *(选题建议包括但不限于：MHD不稳定性、托卡马克偏滤器热负荷、仿星器线圈优化、球形托卡马克优势、惯性约束的点火条件、氚增殖比 TBR 等。)*
+    
+    * **今日词条：[知识点名称]**
+    * **🧐 硬核原理解析**：
+        [用专业术语准确描述其物理机制，约 200 字。展示你的专业性]
+    * **🍎 也就是人话版**：
+        [**重点！** 使用一个极其通俗、生活化的比喻来解释上面的概念。比如把等离子体比作果冻，把磁场比作笼子等。让大一新生也能听懂。约 150 字]
+    * **🤔 为什么它很重要？**：
+        [一句话点出它在聚变发电道路上的地位]
+    
+    ---
+    *保持好奇，探索未来*
     """
     
     try:
@@ -127,13 +167,17 @@ def send_wechat(content):
         print("未配置 Server酱 Key，跳过推送")
         return
 
+    # 标题加上 Emoji 让通知栏更好看
     url = f"https://sctapi.ftqq.com/{SERVERCHAN_SENDKEY}.send"
-    data = {"title": f"⚛️ 核聚变日报 {datetime.date.today()}", "desp": content}
+    data = {
+        "title": f"⚛️ {datetime.date.today()} 聚变情报局日报", 
+        "desp": content
+    }
     requests.post(url, data=data)
 
 if __name__ == "__main__":
     news = get_fusion_news()
     internships = search_internships()
     report = generate_daily_report(news, internships)
-    print(report)
+    print(report) # 在日志里打印预览
     send_wechat(report)
