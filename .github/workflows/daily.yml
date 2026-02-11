@@ -24,11 +24,11 @@ jobs:
         run: |
           pip install requests feedparser google-generativeai beautifulsoup4
 
-      - name: Run Script
+     - name: Run Script
         env:
-          # 这里是从你的“保险箱”里读取密码
           SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          GOOGLE_SEARCH_API_KEY: ${{ secrets.GOOGLE_SEARCH_API_KEY }}
-          GOOGLE_SEARCH_CX: ${{ secrets.GOOGLE_SEARCH_CX }}
+          # 下面这两行必须改成没有下划线的，对应你的 Secret 名字
+          GOOGLESEARCH_API_KEY: ${{ secrets.GOOGLESEARCH_API_KEY }}
+          GOOGLESEARCH_CX: ${{ secrets.GOOGLESEARCH_CX }}
         run: python main.py
