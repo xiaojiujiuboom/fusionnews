@@ -8,13 +8,12 @@ import hashlib
 import google.generativeai as genai
 from bs4 import BeautifulSoup
 from time import mktime
-from duckduckgo_search import DDGS
 
 # --- 配置部分 ---
 SERVERCHAN_SENDKEY = os.environ.get("SERVERCHAN_SENDKEY")
 GEMINI_API_KEY = os.environ.get("GOOGLE_API_KEY") 
 
-# 初始化 Gemini (使用 1.5-flash)
+# 初始化 Gemini
 if GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
@@ -24,44 +23,36 @@ if GEMINI_API_KEY:
 else:
     print("警告: 未配置 GOOGLE_API_KEY")
 
-# --- 辅助函数：网页内容提取器 (借鉴 WorkAggregation 思路) ---
-def fetch_webpage_content(url):
-    """
-    模拟浏览器访问 URL，提取网页正文文本
-    """
+# --- 辅助函数：强力网页抓取器 ---
+def fetch_url_content(url, source_name):
+    print(f"正在抓取 {source_name} ...")
     try:
-        # 伪装成浏览器，防止被简单的反爬虫拦截
+        # 伪装成普通浏览器
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5'
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
-        # 设置 10秒 超时，防止卡死
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status() # 检查 404/500 错误
+        resp = requests.get(url, headers=headers, timeout=15)
         
-        # 使用 BeautifulSoup 解析 HTML
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # 移除 script, style 等无用标签
-        for script in soup(["script", "style", "nav", "footer", "header", "iframe"]):
-            script.extract()
-            
-        # 获取纯文本
-        text = soup.get_text(separator=' ', strip=True)
-        
-        # 截取前 2500 个字符 (防止 Token 爆炸，通常 JD 都在前面)
-        return text[:2500]
-        
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            # 移除脚本和样式，只留干货
+            for script in soup(["script", "style", "nav", "footer", "iframe"]):
+                script.extract()
+            # 提取正文，限制长度防止 token 溢出
+            text = soup.get_text(separator='\n', strip=True)[:4000]
+            print(f"  -> 成功获取 {len(text)} 字符")
+            return f"=== 来自 {source_name} 的招聘页面数据 ===\nURL: {url}\n页面内容摘要:\n{text}\n----------------\n"
+        else:
+            print(f"  -> 失败 (状态码 {resp.status_code})")
+            return f"{source_name} 抓取失败，请手动访问: {url}\n"
     except Exception as e:
-        print(f"  - 访问链接失败 {url}: {e}")
-        return None # 抓取失败返回空
+        print(f"  -> 抓取异常: {e}")
+        return f"{source_name} 连接超时，请手动访问: {url}\n"
 
-# --- 1. 获取新闻 ---
+# --- 1. 获取新闻 (保持不变) ---
 def get_fusion_news():
     print("正在抓取新闻...")
     rss_url = "https://news.google.com/rss/search?q=Nuclear+Fusion+when:48h&hl=en-US&gl=US&ceid=US:en"
-    
     try:
         feed = feedparser.parse(rss_url)
         news_items = []
@@ -70,81 +61,49 @@ def get_fusion_news():
             if hasattr(entry, 'published_parsed'):
                 dt = datetime.datetime.fromtimestamp(mktime(entry.published_parsed))
                 published_time_str = dt.strftime('%Y-%m-%d %H:%M')
-            
             news_items.append(f"- {entry.title} (Time: {published_time_str}) [Link: {entry.link}]")
-            
         return "\n".join(news_items) if news_items else "过去48小时无重大新闻。"
     except Exception as e:
         return f"新闻抓取失败: {e}"
 
-# --- 2. 深度职位挖掘 (Search + Visit) ---
+# --- 2. 职位雷达 (定向靶点抓取模式) ---
 def search_internships():
-    print("正在启动深度职位挖掘机...")
+    print("🚀 启动职位雷达 (Targeted Aggregator Mode)...")
     
-    # 策略组合：混合搜索，试图找到具体的招聘页面
-    search_strategies = [
-        'site:iter.org "job" OR "internship" -filetype:pdf',
-        'site:cfs.energy "careers" OR "jobs"',
-        'site:helionenergy.com "openings"',
-        'site:pppl.gov "jobs"',
-        '"nuclear fusion" "we are hiring" -news',
-        '"plasma physics" internship 2025'
+    # 这里定义了三个含金量最高的聚变职位聚合页
+    targets = [
+        {
+            "name": "Fusion Industry Association (FIA)",
+            "url": "https://www.fusionindustryassociation.org/about/job-opportunities/"
+        },
+        {
+            "name": "US Fusion Energy Opportunities",
+            "url": "https://usfusionenergy.org/opportunities"
+        },
+        {
+            "name": "ITER Jobs",
+            "url": "https://www.iter.org/jobs"
+        }
     ]
     
-    query = random.choice(search_strategies)
-    print(f"本次雷达锁定: {query}")
-
-    try:
-        # 1. 先搜链接
-        # 减少数量到 4 个，因为后面要一个个访问，太慢了会超时
-        results = DDGS().text(query, max_results=4)
+    all_content = ""
+    for target in targets:
+        content = fetch_url_content(target["url"], target["name"])
+        all_content += content
+        time.sleep(2) # 礼貌延时
         
-        if not results:
-            return "DuckDuckGo 未发现雷达信号，建议手动检查。"
+    return all_content
 
-        processed_jobs = []
-        for item in results:
-            title = item.get('title', 'No Title')
-            link = item.get('href', '#')
-            snippet = item.get('body', '')
-            
-            print(f"发现线索: {title}，正在派遣爬虫深入侦察...")
-            
-            # 2. 【核心升级】点进去看！
-            # 调用上面的 fetch 函数去抓网页正文
-            full_content = fetch_webpage_content(link)
-            
-            if full_content:
-                # 如果抓到了正文，就喂给 AI 正文
-                content_to_use = f"【网页正文抓取】: {full_content}"
-            else:
-                # 如果抓取失败（比如被反爬），回退到使用摘要
-                content_to_use = f"【仅摘要】: {snippet}"
-            
-            processed_jobs.append(f"SOURCE_URL: {link}\nTITLE: {title}\nCONTENT: {content_to_use}\n---")
-            
-            # 礼貌性延时，防止请求太快被封
-            time.sleep(2)
-            
-        return "\n".join(processed_jobs)
-
-    except Exception as e:
-        print(f"挖掘机故障: {e}")
-        return f"职位扫描模块暂时休眠: {e}"
-
-# --- 3. 生成日报 (Prompt 适配长文本) ---
+# --- 3. 生成日报 ---
 def generate_daily_report(news_text, internship_text):
     print("正在生成 AI 日报...")
     today_str = datetime.date.today().strftime('%Y-%m-%d')
 
     fusion_topics = [
-        "劳森判据", "库仑碰撞", "Q值", "三重积", "MHD不稳定性", "阿尔芬波", 
-        "托卡马克", "仿星器", "球形托卡马克", "反场箍缩", "Z-Pinch", "ICF",
-        "第一壁材料", "钨", "铍", "偏滤器", "氚增殖比", "锂铅包层", "中子辐照", 
-        "NBI加热", "ICRH", "ECRH", "H模式", "ELMs", "锯齿振荡", 
-        "ITER", "CFS SPARC", "Helion", "General Fusion", "HL-3", "NIF"
+        "劳森判据", "Q值", "MHD不稳定性", "托卡马克", "仿星器", "ICF",
+        "第一壁材料", "钨", "偏滤器", "氚增殖比", "中子辐照", "H模式", 
+        "ELMs", "ITER", "CFS SPARC", "Helion", "General Fusion"
     ]
-    
     date_hash = int(hashlib.sha256(today_str.encode('utf-8')).hexdigest(), 16)
     today_topic = fusion_topics[date_hash % len(fusion_topics)]
 
@@ -155,8 +114,8 @@ def generate_daily_report(news_text, internship_text):
     ### 1. News Data
     {news_text}
     
-    ### 2. Job Intel (深度抓取数据)
-    *(以下数据包含了爬虫直接从网页抓取的正文。请忽略网页导航栏等杂讯，重点提取职位描述、要求。)*
+    ### 2. Job Market Intel (Raw Scraped Data)
+    *(这是直接从 FIA、ITER 等官网抓取的网页正文文本。)*
     {internship_text}
     
     ### 3. Topic: {today_topic}
@@ -171,17 +130,23 @@ def generate_daily_report(news_text, internship_text):
     * **[中文标题]**
         * 🕒 **Time**: [时间]
         * 🚀 **Significance**: [点评]
-        * 🔗 [点击阅读原文]({'{link}'}) 
+        * 🔗 [点击阅读原文]({'{link}'})
     
-    ## 🎯 2. Career Radar (深度侦察)
-    *(指令：我已通过爬虫抓取了网页正文。请根据【网页正文抓取】的内容，像猎头一样详细分析。)*
-    *(如果抓取内容包含 "Apply"、"Requirements"、"Responsibilities" 等干货，请重点列出。)*
-    *(如果抓取内容看起来是很多职位的列表页，请总结“该机构正在招聘哪些方向的人才”。)*
+    ## 🎯 2. Career Radar (官网直连)
+    *(指令：请分析抓取到的网页正文。告诉用户这些页面上目前主要在招哪些类型的岗位？有没有提到具体的公司名字？)*
+    *(注意：如果网页正文太乱，请只提取最核心的岗位关键词，如 'Plasma Physicist', 'Intern', 'Engineer' 等。)*
     
-    * 🏢 **[机构/职位名称]**
-        * 📝 **深度情报**: [从正文中提取：具体在做什么项目？涉及什么物理/工程难题？]
-        * 🛠️ **通缉令**: [从正文中提取：硬性要求是什么？PhD？Python？C++？]
-        * 🔗 [点击直达官网]({'{link}'})
+    * 🏢 **Fusion Industry Association (FIA)**
+        * 📝 **情报**: [根据抓取内容，总结FIA页面上列出的最新机会类型]
+        * 🔗 [点击直达汇总页](https://www.fusionindustryassociation.org/about/job-opportunities/)
+        
+    * 🏢 **US Fusion Energy**
+        * 📝 **情报**: [根据抓取内容，总结美国方面的机会]
+        * 🔗 [点击直达汇总页](https://usfusionenergy.org/opportunities)
+
+    * 🏢 **ITER Organization**
+        * 📝 **情报**: [根据抓取内容，ITER最近在招什么人？]
+        * 🔗 [点击直达官网](https://www.iter.org/jobs)
     
     ## 🧠 3. Deep Dive: {today_topic}
     * **今日词条：{today_topic}**
@@ -190,7 +155,7 @@ def generate_daily_report(news_text, internship_text):
     * **🤔 为什么重要？**：[一句话]
     
     ---
-    *Generated by FusionBot · Topic: {today_topic}*
+    *Generated by FusionBot*
     """
     
     max_retries = 3
