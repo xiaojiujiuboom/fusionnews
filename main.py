@@ -45,7 +45,7 @@ def get_fusion_news():
 # --- 2. 广域搜索实习 ---
 def search_internships():
     print("正在搜索实习岗位...")
-    if not SEARCH_API_KEY or not SEARCH_CX:
+    if not GOOGLESEARCHAPI_KEY or not GOOFLESEARCH_CX:
         return "错误：未配置 Google Search API Key 或 CX ID。"
 
     # 搜索关键词优化：强制包含 fusion，寻找 internship/thesis
@@ -54,8 +54,8 @@ def search_internships():
     
     url = "https://www.googleapis.com/customsearch/v1"
     params = {
-        'key': SEARCH_API_KEY,
-        'cx': SEARCH_CX,
+        'key': GOOGLESEARCH_API_KEY,
+        'cx': GOOLESEARCH_CX,
         'q': query,
         'dateRestrict': 'm3', # 限制最近3个月，保证新鲜度
         'num': 3 # 只取最相关的3个
@@ -108,7 +108,7 @@ def generate_daily_report(news_text, internship_text):
 
     ### 第一部分：聚变前沿动态 (Strict Format)
     请阅读以下新闻数据，挑选最有价值的 7-8 条。
-    对于每一条，必须严格按照以下格式总结（不要废话）：
+    对于每一条，必须严格按照以下格式总结，中文格式输出（不要废话）：
     
     News Data:
     {news_text}
@@ -122,7 +122,7 @@ def generate_daily_report(news_text, internship_text):
 
     ---
 
-    ### 第二部分：近期实习/岗位雷达 (Top 3)
+    ### 第二部分：岗位雷达
     请阅读以下抓取到的岗位信息，提炼最核心的干货。
     
     Internship Data:
@@ -141,7 +141,7 @@ def generate_daily_report(news_text, internship_text):
     **目标受众**：具备等离子体物理或核工程基础的本科/研究生（非普通大众）。
     **要求**：
     1.  拒绝浅显的阐述，可以深入讲解。
-    2.  选取一个**具体的、进阶的**知识点。例如：磁流体动力学(MHD)不稳定性（如锯齿振荡、ELMs）、托卡马克偏滤器材料挑战、氚增殖比(TBR)的计算、仿星器的线圈优化逻辑、惯性约束的瑞利-泰勒不稳定性等，对部分抽象知识点可以辅佐现实举例解释。
+    2.  选取一个**具体的、进阶的**知识点。例如可以包括但不限于：磁流体动力学(MHD)不稳定性（如锯齿振荡、ELMs）、托卡马克偏滤器材料挑战、氚增殖比(TBR)的计算、仿星器的线圈优化逻辑、惯性约束的瑞利-泰勒不稳定性等，对部分抽象知识点可以辅佐现实举例解释。
     3.  字数 250-300 字，逻辑严密，可以包含必要的物理参数或工程指标。
     4.  最后附上一句简短的点评或思考。
 
