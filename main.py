@@ -54,8 +54,8 @@ def search_internships():
     
     url = "https://www.googleapis.com/customsearch/v1"
     params = {
-        'key': GOOGLESEARCH_API_KEY,
-        'cx': GOOLESEARCH_CX,
+        'key': SEARCH_API_KEY,
+        'cx': SEARCH_CX,
         'q': query,
         'dateRestrict': 'm3', # 限制最近3个月，保证新鲜度
         'num': 3 # 只取最相关的3个
