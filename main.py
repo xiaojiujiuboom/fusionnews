@@ -64,17 +64,21 @@ def search_jobs_deep_dive():
     # 目标源：包含聚合页和具体的实验室页面
     # 策略：不仅看这个页面，还要尝试点开里面的理工科岗位
     targets = [
-        {"name": "ITER Jobs", "url": "https://www.iter.org/jobs", "base": "https://www.iter.org"},
-        {"name": "UKAEA (英国原子能局)", "url": "https://careers.ukaea.uk/vacancies/", "base": "https://careers.ukaea.uk"},
-        {"name": "Princeton Plasma Physics Lab", "url": "https://www.pppl.gov/careers", "base": "https://www.pppl.gov"},
-        {"name": "General Fusion", "url": "https://generalfusion.com/careers/", "base": "https://generalfusion.com"},
-        {"name": "Tokamak Energy", "url": "https://tokamakenergy.co.uk/careers", "base": "https://tokamakenergy.co.uk"},
-        {"name": "Commonwealth Fusion Systems", "url": "https://cfs.energy/careers", "base": "https://cfs.energy"},
-        {"name": "US Fusion Energy", "url": "https://usfusionenergy.org/opportunities", "base": "https://usfusionenergy.org"}
+        {"name": "ITER Jobs", "url": "https://www.iter.org/public/jobs/open-positions", "base": "https://www.iter.org"},
+        {"name": "UKAEA (英国原子能局)", "url": "https://careers.ukaea.uk/current-vacancies/", "base": "https://careers.ukaea.uk"},
+        {"name": "Princeton Plasma Physics Lab", "url": "https://pppl-princeton.icims.com/jobs/search?mobile=false&width=1410&height=500&bga=true&needsRedirect=false&jan1offset=60&jun1offset=120", "base": "https://www.pppl.gov"},
+        {"name": "General Fusion", "url": "https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=3196ba6f-d49c-4493-9290-3d91489bdfa9&ccId=19000101_000001&type=JS&lang=en_CA", "base": "https://generalfusion.com"},
+        {"name": "Tokamak Energy", "url": "https://apply.workable.com/tokamak-energy/?lng=en#jobs", "base": "https://tokamakenergy.co.uk"}, 
+        {"name": "Commonwealth Fusion Systems", "url": "https://jobs.lever.co/cfsenergy", "base": "https://cfs.energy"},
+        {"name": "US Fusion Energy", "url": "https://usfusionenergy.org/opportunities", "base": "https://usfusionenergy.org"},
+        {"name": "Proxima Fusion (德国/恒星器)", "url": "https://jobs.ashbyhq.com/proxima-fusion", "base": "https://www.proximafusion.com"},
+        {"name": "IAEA", "url": "https://iaea.taleo.net/careersection/ex/jobsearch.ftl", "base": "https://www.iaea.org/"},
+        {"name": "VTT", "url": "https://www.vttresearch.com/en/careers/come-and-build-future-vtt", "base": "https://www.vttresearch.com/en"},
+        {"name": "Renaissance Fusion", "url": "https://renfusion.eu/job-openings", "base": "https://renfusion.eu/"},
     ]
 
     # 关键词过滤：只对包含这些词的链接感兴趣
-    stem_keywords = ["physicist", "engineer", "scientist", "research", "plasma", "postdoc", "fellow", "technical", "diagnostics", "magnet", "cryogenic"]
+    stem_keywords = ["physicist", "engineer", "scientist", "research", "plasma", "postdoc", "fellow", "technical", "diagnostics", "magnet", "cryogenic", "physics", "fusion", "simulation" ,"numerical", "online", "Phd", "doctor"]
     
     final_report_data = ""
 
